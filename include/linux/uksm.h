@@ -16,6 +16,12 @@
 #include <linux/rmap.h>
 #include <linux/sched.h>
 
+#include <linux/ksm.h>
+
+extern wait_queue_head_t uksm_frontswap_wait ;
+extern struct task_struct *uksm_task ;
+extern struct mutex uksm_frontswap_wait_mutex ;
+
 extern unsigned long zero_pfn __read_mostly;
 extern unsigned long uksm_zero_pfn __read_mostly;
 extern struct page *empty_uksm_zero_page;

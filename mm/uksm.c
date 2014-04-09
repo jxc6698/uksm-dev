@@ -73,6 +73,12 @@
 #include <asm/tlbflush.h>
 #include "internal.h"
 
+#include <linux/uksm.h>
+
+DECLARE_WAIT_QUEUE_HEAD( uksm_frontswap_wait );
+struct task_struct *uksm_task ;
+DEFINE_MUTEX( uksm_frontswap_wait_mutex ) ;
+
 #ifdef CONFIG_X86
 #undef memcmp
 
@@ -4631,6 +4637,8 @@ static int uksm_scan_thread(void *nothing)
 		}
 		mutex_unlock(&uksm_thread_mutex);
 
+		wake_up_all( &uksm_frontswap_wait ) ;
+
 		try_to_freeze();
 
 		if (ksmd_should_run()) {
@@ -5473,6 +5481,7 @@ static int __init uksm_init(void)
 		goto out_free0;
 
 	uksm_thread = kthread_run(uksm_scan_thread, NULL, "uksmd");
+	uksm_task = uksm_thread ;
 	if (IS_ERR(uksm_thread)) {
 		printk(KERN_ERR "uksm: creating kthread failed\n");
 		err = PTR_ERR(uksm_thread);

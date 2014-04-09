@@ -24,6 +24,8 @@
 #include <linux/blkdev.h>
 #include <asm/pgtable.h>
 
+#include <linux/uksm.h>
+
 static struct bio *get_swap_bio(gfp_t gfp_flags,
 				struct page *page, bio_end_io_t end_io)
 {
@@ -232,11 +234,16 @@ bad_bmap:
 int swap_writepage(struct page *page, struct writeback_control *wbc)
 {
 	int ret = 0;
+	DEFINE_WAIT( wait ) ;
 
 	if (try_to_free_swap(page)) {
 		unlock_page(page);
 		goto out;
 	}
+	prepare_to_wait( &uksm_frontswap_wait , &wait , TASK_INTERRUPTIBLE) ;
+	wake_up_process( uksm_task ) ;
+	schedule() ;
+	finish_wait( &uksm_frontswap_wait , &wait ) ;
 	if (frontswap_store(page) == 0) {
 		set_page_writeback(page);
 		unlock_page(page);
