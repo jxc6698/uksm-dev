@@ -235,15 +235,49 @@ int swap_writepage(struct page *page, struct writeback_control *wbc)
 {
 	int ret = 0;
 	DEFINE_WAIT( wait ) ;
+	int temp_res = 0 ;
+	temp_res = PageKsm( page ) ;
 
 	if (try_to_free_swap(page)) {
 		unlock_page(page);
 		goto out;
 	}
-	prepare_to_wait( &uksm_frontswap_wait , &wait , TASK_INTERRUPTIBLE) ;
-	wake_up_process( uksm_task ) ;
-	schedule() ;
-	finish_wait( &uksm_frontswap_wait , &wait ) ;
+	if( current != uksm_task )
+	{
+
+		prepare_to_wait( &uksm_frontswap_wait , &wait , TASK_INTERRUPTIBLE) ;
+		spin_lock( &uksm_run_data_lock ) ;
+	
+		if( get_uksm_wait_num() > 0 || test_uksm_in() )
+		{
+			;
+		}else  // get_uksm_wait_num = 0
+		{
+			wake_up_process( uksm_task ) ;
+		}
+
+		spin_unlock( &uksm_run_data_lock ) ;
+
+		schedule() ;
+		finish_wait( &uksm_frontswap_wait , &wait ) ;
+	}
+	
+	if( PageKsm( page ) )
+	{
+		if( temp_res )
+		{
+			printk("\n\n\n both uksm page \n\n\n" );
+		}
+		else
+		{
+			printk( " \n\n\n uksm handle it \n\n\n") ;
+		}
+	}else if( temp_res )
+	{
+		printk("\n\n\n origin is ksm \n\n\n") ;
+	}
+
+
 	if (frontswap_store(page) == 0) {
 		set_page_writeback(page);
 		unlock_page(page);

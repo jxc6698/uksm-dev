@@ -21,10 +21,29 @@
 extern wait_queue_head_t uksm_frontswap_wait ;
 extern struct task_struct *uksm_task ;
 extern struct mutex uksm_frontswap_wait_mutex ;
+extern spinlock_t uksm_run_data_lock ;
+extern long uksm_run_data_lock_flag ;
+extern long uksm_is_run ;
+/**
+*	already held uksm_run_data_lock 
+*/
+static int test_uksm_in()
+{
+	return uksm_run_data_lock_flag < 0 ;
+}
+static int get_uksm_wait_num()
+{
+	//	equals uksm_run_data_lock_flag
+	return uksm_run_data_lock_flag >= 0 ? uksm_run_data_lock_flag : -1 ;
+}
+
+
 
 extern unsigned long zero_pfn __read_mostly;
 extern unsigned long uksm_zero_pfn __read_mostly;
 extern struct page *empty_uksm_zero_page;
+
+
 
 /* must be done before linked to mm */
 extern void uksm_vma_add_new(struct vm_area_struct *vma);
