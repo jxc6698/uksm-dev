@@ -246,8 +246,9 @@ int swap_writepage(struct page *page, struct writeback_control *wbc)
 	{
 
 		prepare_to_wait( &uksm_frontswap_wait , &wait , TASK_INTERRUPTIBLE) ;
-		spin_lock( &uksm_run_data_lock ) ;
-	
+		uksm_lock() ;
+
+		add_uksm_wait() ;
 		if( get_uksm_wait_num() > 0 || test_uksm_in() )
 		{
 			;
@@ -256,7 +257,7 @@ int swap_writepage(struct page *page, struct writeback_control *wbc)
 			wake_up_process( uksm_task ) ;
 		}
 
-		spin_unlock( &uksm_run_data_lock ) ;
+		uksm_lock() ;
 
 		schedule() ;
 		finish_wait( &uksm_frontswap_wait , &wait ) ;

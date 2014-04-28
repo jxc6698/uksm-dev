@@ -24,20 +24,42 @@ extern struct mutex uksm_frontswap_wait_mutex ;
 extern spinlock_t uksm_run_data_lock ;
 extern long uksm_run_data_lock_flag ;
 extern long uksm_is_run ;
+
+static void uksm_lock(void )
+{
+	spin_lock( &uksm_run_data_lock ) ;
+}
+
+static void uksm_unlock(void )
+{
+	spin_unlock( &uksm_run_data_lock ) ;
+}
+
+
 /**
 *	already held uksm_run_data_lock 
 */
-static int test_uksm_in()
+static int test_uksm_in(void)
 {
 	return uksm_run_data_lock_flag < 0 ;
 }
-static int get_uksm_wait_num()
+static int get_uksm_wait_num(void)
 {
 	//	equals uksm_run_data_lock_flag
 	return uksm_run_data_lock_flag >= 0 ? uksm_run_data_lock_flag : -1 ;
 }
-
-
+static int add_uksm_wait(void)
+{
+	return uksm_run_data_lock_flag ++ ;
+}
+static int set_uksm_in(void)
+{
+	uksm_run_data_lock_flag = -1 ;
+}
+static int set_uksm_out(void)
+{
+	uksm_run_data_lock_flag = 0 ;
+}
 
 extern unsigned long zero_pfn __read_mostly;
 extern unsigned long uksm_zero_pfn __read_mostly;

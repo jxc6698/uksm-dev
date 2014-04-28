@@ -4645,6 +4645,13 @@ static int uksm_scan_thread(void *nothing)
 			uksm_do_scan();
 		}
 		mutex_unlock(&uksm_thread_mutex);
+		
+		uksm_lock() ;
+		if( get_uksm_wait_num() > 0 )
+		{
+			set_uksm_out() ;
+		}
+		uksm_lock() ;
 
 		wake_up_all( &uksm_frontswap_wait ) ;
 
