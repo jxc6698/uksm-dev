@@ -257,7 +257,7 @@ int swap_writepage(struct page *page, struct writeback_control *wbc)
 			wake_up_process( uksm_task ) ;
 		}
 
-		uksm_lock() ;
+		uksm_unlock() ;
 
 		schedule() ;
 		finish_wait( &uksm_frontswap_wait , &wait ) ;

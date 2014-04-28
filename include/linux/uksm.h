@@ -18,21 +18,44 @@
 
 #include <linux/ksm.h>
 
+
+struct uksm_frontswap_lock_struct{
+	u32 head , tail ;
+};
+
 extern wait_queue_head_t uksm_frontswap_wait ;
 extern struct task_struct *uksm_task ;
 extern struct mutex uksm_frontswap_wait_mutex ;
-extern spinlock_t uksm_run_data_lock ;
+//extern spinlock_t uksm_run_data_lock ;
 extern long uksm_run_data_lock_flag ;
 extern long uksm_is_run ;
+extern struct uksm_frontswap_lock_struct uksm_frontswap_lock ;
 
+static void uksm_lock_init(void )
+{
+	uksm_frontswap_lock.head = 1 ;
+	uksm_frontswap_lock.tail = 0 ;
+}
 static void uksm_lock(void )
 {
-	spin_lock( &uksm_run_data_lock ) ;
+	struct uksm_frontswap_lock_struct inc = { .tail = 1 } ;
+	inc = xadd( &uksm_frontswap_lock , inc ) ;
+	for( ; ; )
+	{
+		if( inc.head == inc.tail )
+			break ;
+		cpu_relax() ;
+		inc.head = ACCESS_ONCE( inc.tail ) ;
+	}
+	barrier() ;
+//	spin_lock( &uksm_run_data_lock ) ;
 }
 
 static void uksm_unlock(void )
 {
-	spin_unlock( &uksm_run_data_lock ) ;
+	__add(&uksm_frontswap_lock.head, 1, UNLOCK_LOCK_PREFIX);
+	printk( " %d    %d\n" , uksm_frontswap_lock.head , uksm_frontswap_lock.tail ) ;
+//	spin_unlock( &uksm_run_data_lock ) ;
 }
 
 

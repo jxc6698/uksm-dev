@@ -78,7 +78,8 @@
 DECLARE_WAIT_QUEUE_HEAD( uksm_frontswap_wait );
 struct task_struct *uksm_task ;
 DEFINE_MUTEX( uksm_frontswap_wait_mutex ) ;
-spinlock_t uksm_run_data_lock ;
+struct uksm_frontswap_lock_struct uksm_frontswap_lock ;
+//spinlock_t uksm_run_data_lock ;
 /**
 *	> 0	: number of thread wait in 
 *	= 0	: no one wait
@@ -4651,8 +4652,7 @@ static int uksm_scan_thread(void *nothing)
 		{
 			set_uksm_out() ;
 		}
-		uksm_lock() ;
-
+		uksm_unlock() ;
 		wake_up_all( &uksm_frontswap_wait ) ;
 
 		try_to_freeze();
@@ -5498,7 +5498,8 @@ static int __init uksm_init(void)
 
 	uksm_thread = kthread_run(uksm_scan_thread, NULL, "uksmd");
 	uksm_task = uksm_thread ;
-	spin_lock_init( &uksm_run_data_lock ) ; // should it init earlier ?
+	uksm_lock_init() ;
+//	spin_lock_init( &uksm_run_data_lock ) ; // should it init earlier ?
 	if (IS_ERR(uksm_thread)) {
 		printk(KERN_ERR "uksm: creating kthread failed\n");
 		err = PTR_ERR(uksm_thread);
