@@ -19,44 +19,16 @@
 #include <linux/ksm.h>
 
 
-struct uksm_frontswap_lock_struct{
-	u32 head , tail ;
-};
 
 extern wait_queue_head_t uksm_frontswap_wait ;
 extern struct task_struct *uksm_task ;
 extern struct mutex uksm_frontswap_wait_mutex ;
 //extern spinlock_t uksm_run_data_lock ;
+extern struct raw_spinlock uksm_run_data_lock ;
 extern long uksm_run_data_lock_flag ;
-extern long uksm_is_run ;
-extern struct uksm_frontswap_lock_struct uksm_frontswap_lock ;
 
-static void uksm_lock_init(void )
-{
-	uksm_frontswap_lock.head = 1 ;
-	uksm_frontswap_lock.tail = 0 ;
-}
-static void uksm_lock(void )
-{
-	struct uksm_frontswap_lock_struct inc = { .tail = 1 } ;
-	inc = xadd( &uksm_frontswap_lock , inc ) ;
-	for( ; ; )
-	{
-		if( inc.head == inc.tail )
-			break ;
-		cpu_relax() ;
-		inc.head = ACCESS_ONCE( inc.tail ) ;
-	}
-	barrier() ;
-//	spin_lock( &uksm_run_data_lock ) ;
-}
 
-static void uksm_unlock(void )
-{
-	__add(&uksm_frontswap_lock.head, 1, UNLOCK_LOCK_PREFIX);
-	printk( " %d    %d\n" , uksm_frontswap_lock.head , uksm_frontswap_lock.tail ) ;
-//	spin_unlock( &uksm_run_data_lock ) ;
-}
+#define UKSM_IN  (0x00000001 << 16)
 
 
 /**
@@ -64,25 +36,55 @@ static void uksm_unlock(void )
 */
 static int test_uksm_in(void)
 {
-	return uksm_run_data_lock_flag < 0 ;
+	return uksm_run_data_lock_flag & UKSM_IN ;
 }
-static int get_uksm_wait_num(void)
+static long get_uksm_wait_num(void)
 {
 	//	equals uksm_run_data_lock_flag
-	return uksm_run_data_lock_flag >= 0 ? uksm_run_data_lock_flag : -1 ;
+	return (uksm_run_data_lock_flag & (~UKSM_IN) ) >= 0 ? (uksm_run_data_lock_flag & (~UKSM_IN) ) : -1 ;
 }
 static int add_uksm_wait(void)
 {
-	return uksm_run_data_lock_flag ++ ;
+	uksm_run_data_lock_flag ++ ;
+	return uksm_run_data_lock_flag ;
 }
 static int set_uksm_in(void)
 {
-	uksm_run_data_lock_flag = -1 ;
+	uksm_run_data_lock_flag |= UKSM_IN ;
+	return uksm_run_data_lock_flag ;
 }
 static int set_uksm_out(void)
 {
+//	return uksm_run_data_lock_flag &= (~UKSM_IN) ;
 	uksm_run_data_lock_flag = 0 ;
+	return uksm_run_data_lock_flag ;
 }
+
+#define SCAN_LADDER_SIZE 4
+
+
+struct uksm_real_runtime_flags{
+	/*	
+	*	flags = 1 , runtime data haa been backup
+	*	in case uksm_do_scan runs, another process put itselt to the wait list
+	*/
+	unsigned int flags ;
+	int cpu_ratio[ SCAN_LADDER_SIZE ] ;
+	unsigned int cover_msecs[ SCAN_LADDER_SIZE ] ;
+	unsigned int max_cpu ;
+	unsigned int uksm_cpu_governor ;
+};
+
+#undef SCAN_LADDER_SIZE
+
+extern struct uksm_real_runtime_flags uksm_runtime_backup ;
+extern void save_uksm_runtime_data(void) ;
+extern void restore_uksm_runtime_data(void) ;
+extern int test_uksm_backup(void) ;
+
+
+
+
 
 extern unsigned long zero_pfn __read_mostly;
 extern unsigned long uksm_zero_pfn __read_mostly;

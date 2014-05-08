@@ -78,8 +78,7 @@
 DECLARE_WAIT_QUEUE_HEAD( uksm_frontswap_wait );
 struct task_struct *uksm_task ;
 DEFINE_MUTEX( uksm_frontswap_wait_mutex ) ;
-struct uksm_frontswap_lock_struct uksm_frontswap_lock ;
-//spinlock_t uksm_run_data_lock ;
+DEFINE_RAW_SPINLOCK( uksm_run_data_lock ) ;
 /**
 *	> 0	: number of thread wait in 
 *	= 0	: no one wait
@@ -87,7 +86,7 @@ struct uksm_frontswap_lock_struct uksm_frontswap_lock ;
 *	last run time
 */
 long uksm_run_data_lock_flag ;
-long uksm_is_run ; //?? 
+struct uksm_real_runtime_flags uksm_runtime_backup ;
 
 #ifdef CONFIG_X86
 #undef memcmp
@@ -4636,23 +4635,52 @@ static int ksmd_should_run(void)
 }
 
 static int uksm_scan_thread(void *nothing)
-{
+{	
+	int i ;
+	static int count = 0 ;
+	unsigned long flags ;
+	struct scan_rung *rung ;
 	set_freezable();
 	set_user_nice(current, 5);
 
 	while (!kthread_should_stop()) {
 		mutex_lock(&uksm_thread_mutex);
 		if (ksmd_should_run()) {
+
+			raw_spin_lock_irqsave( &uksm_run_data_lock , flags ) ;
+			set_uksm_in() ;
+			if(  get_uksm_wait_num() > 0 ) 
+			{
+				save_uksm_runtime_data() ;
+			}
+			raw_spin_unlock_irqrestore( &uksm_run_data_lock , flags ) ;
+
 			uksm_do_scan();
 		}
 		mutex_unlock(&uksm_thread_mutex);
-		
-		uksm_lock() ;
+
+		count ++ ;
+		if( count % 10 == 0 ) 
+		{
+			for( i=0;i<SCAN_LADDER_SIZE ; i ++)
+			{
+				rung = uksm_scan_ladder + i ;
+				printk("%d  " , rung_get_pages(rung) ) ;
+			}
+			printk("\n");
+		}
+
+
+		raw_spin_lock_irqsave( &uksm_run_data_lock , flags ) ;
 		if( get_uksm_wait_num() > 0 )
 		{
-			set_uksm_out() ;
+			if( test_uksm_backup() )
+			{
+				restore_uksm_runtime_data() ;
+			}
 		}
-		uksm_unlock() ;
+		set_uksm_out() ;
+		raw_spin_unlock_irqrestore( &uksm_run_data_lock , flags ) ;
 		wake_up_all( &uksm_frontswap_wait ) ;
 
 		try_to_freeze();
@@ -5498,8 +5526,9 @@ static int __init uksm_init(void)
 
 	uksm_thread = kthread_run(uksm_scan_thread, NULL, "uksmd");
 	uksm_task = uksm_thread ;
-	uksm_lock_init() ;
+	uksm_run_data_lock_flag = 0 ;
 //	spin_lock_init( &uksm_run_data_lock ) ; // should it init earlier ?
+	uksm_runtime_backup.flags = 0 ;
 	if (IS_ERR(uksm_thread)) {
 		printk(KERN_ERR "uksm: creating kthread failed\n");
 		err = PTR_ERR(uksm_thread);
@@ -5543,4 +5572,61 @@ subsys_initcall(ksm_init);
 #else
 late_initcall(uksm_init);
 #endif
+
+
+
+struct uksm_cpu_preset_s new_mode = { {20, 40 , 5000 , -10000}, {1000, 1000 , 1000 , 0} , 95 } ;
+
+void save_uksm_runtime_data(void)
+{
+    int i ;
+    struct scan_rung *rung ;
+	uksm_runtime_backup.flags = 1 ;
+    for( i=0 ; i < SCAN_LADDER_SIZE ; i ++ )
+    {
+        rung = uksm_scan_ladder + i ;
+        uksm_runtime_backup.cpu_ratio[i] = rung->cpu_ratio ;
+        uksm_runtime_backup.cover_msecs[i] = rung->cover_msecs ;
+    }
+    uksm_runtime_backup.max_cpu = uksm_max_cpu_percentage ;
+	// replace with new data
+
+	for( i=0 ; i < SCAN_LADDER_SIZE ; i ++ ) 
+	{
+		rung = uksm_scan_ladder + i ;
+		rung->cpu_ratio = new_mode.cpu_ratio[i] ;
+		rung->cover_msecs = new_mode.cpu_ratio[i] ;
+	}
+	uksm_max_cpu_percentage = new_mode.max_cpu ; 
+
+    return ;
+}
+
+
+
+void restore_uksm_runtime_data(void)
+{
+	int i ;
+	struct scan_rung *rung ;
+	// save old data 
+	for( i=0; i < SCAN_LADDER_SIZE ; i ++ )
+	{
+		rung = uksm_scan_ladder + i ; 
+		rung->cpu_ratio = uksm_runtime_backup.cpu_ratio[i] ;
+		rung->cover_msecs = uksm_runtime_backup.cover_msecs[i] ; 
+	}
+	uksm_max_cpu_percentage = uksm_runtime_backup.max_cpu ; 
+
+}
+
+
+/**
+*	test whether the uksm has backup the runtime data 
+*/
+int test_uksm_backup(void)
+{
+	return uksm_runtime_backup.flags ; 
+}
+
+
 
