@@ -87,6 +87,8 @@ DEFINE_RAW_SPINLOCK( uksm_run_data_lock ) ;
 */
 long uksm_run_data_lock_flag ;
 struct uksm_real_runtime_flags uksm_runtime_backup ;
+atomic_t uksm_vma_num ;
+atomic_t uksm_vma_num_new ;
 
 #ifdef CONFIG_X86
 #undef memcmp
@@ -1144,6 +1146,8 @@ void uksm_vma_add_new(struct vm_area_struct *vma)
 	spin_lock(&vma_slot_list_lock);
 	list_add_tail(&slot->slot_list, &vma_slot_new);
 	spin_unlock(&vma_slot_list_lock);
+	atomic_inc(&uksm_vma_num );
+	atomic_inc(&uksm_vma_num_new );
 }
 
 /*
@@ -1173,6 +1177,7 @@ void uksm_remove_vma(struct vm_area_struct *vma)
 	}
 	spin_unlock(&vma_slot_list_lock);
 	vma->uksm_vma_slot = NULL;
+	atomic_dec( &uksm_vma_num ) ;
 }
 
 /*   32/3 < they < 32/2 */
@@ -4636,10 +4641,7 @@ static int ksmd_should_run(void)
 
 static int uksm_scan_thread(void *nothing)
 {	
-	int i ;
-	static int count = 0 ;
 	unsigned long flags ;
-	struct scan_rung *rung ;
 	set_freezable();
 	set_user_nice(current, 5);
 
@@ -4659,30 +4661,23 @@ static int uksm_scan_thread(void *nothing)
 		}
 		mutex_unlock(&uksm_thread_mutex);
 
-		count ++ ;
-		if( count % 10 == 0 ) 
-		{
-			for( i=0;i<SCAN_LADDER_SIZE ; i ++)
-			{
-				rung = uksm_scan_ladder + i ;
-				printk("%d  " , rung_get_pages(rung) ) ;
-			}
-			printk("\n");
-		}
-
 
 		raw_spin_lock_irqsave( &uksm_run_data_lock , flags ) ;
 		if( get_uksm_wait_num() > 0 )
 		{
-			if( test_uksm_backup() )
+			if(whether_wake_up() )
 			{
-				restore_uksm_runtime_data() ;
+				if( test_uksm_backup() )
+				{
+					restore_uksm_runtime_data() ;
+				}
+				wake_up_all( &uksm_frontswap_wait ) ;
 			}
+		
 		}
 		set_uksm_out() ;
-		raw_spin_unlock_irqrestore( &uksm_run_data_lock , flags ) ;
-		wake_up_all( &uksm_frontswap_wait ) ;
 
+		raw_spin_unlock_irqrestore( &uksm_run_data_lock , flags ) ;
 		try_to_freeze();
 
 		if (ksmd_should_run()) {
@@ -5527,8 +5522,9 @@ static int __init uksm_init(void)
 	uksm_thread = kthread_run(uksm_scan_thread, NULL, "uksmd");
 	uksm_task = uksm_thread ;
 	uksm_run_data_lock_flag = 0 ;
-//	spin_lock_init( &uksm_run_data_lock ) ; // should it init earlier ?
+	uksm_runtime_backup.uksm_eval_round = uksm_eval_round ;
 	uksm_runtime_backup.flags = 0 ;
+
 	if (IS_ERR(uksm_thread)) {
 		printk(KERN_ERR "uksm: creating kthread failed\n");
 		err = PTR_ERR(uksm_thread);
@@ -5574,8 +5570,10 @@ late_initcall(uksm_init);
 #endif
 
 
+#ifdef UKSM_ZSWAP
+struct uksm_cpu_preset_s new_mode = { { -400 , -600 , -6000 , -10000}, {1000, 500 , 200 , 200} , 95 } ;
 
-struct uksm_cpu_preset_s new_mode = { {20, 40 , 5000 , -10000}, {1000, 1000 , 1000 , 0} , 95 } ;
+//struct uksm_cpu_preset_s new_mode = { { -400 , -600 , -6000 , -10000}, {1000, 500 , 200 , 200} , 20 } ;
 
 void save_uksm_runtime_data(void)
 {
@@ -5598,7 +5596,6 @@ void save_uksm_runtime_data(void)
 		rung->cover_msecs = new_mode.cpu_ratio[i] ;
 	}
 	uksm_max_cpu_percentage = new_mode.max_cpu ; 
-
     return ;
 }
 
@@ -5619,7 +5616,6 @@ void restore_uksm_runtime_data(void)
 
 }
 
-
 /**
 *	test whether the uksm has backup the runtime data 
 */
@@ -5628,5 +5624,97 @@ int test_uksm_backup(void)
 	return uksm_runtime_backup.flags ; 
 }
 
+void save_sleep_time(void)
+{
+	uksm_runtime_backup.uksm_sleep_real = uksm_sleep_real ;
+}
 
+void clear_sleep_time(void)
+{
+	uksm_runtime_backup.uksm_sleep_real = 0 ;
+}
+
+/** Already held  uksm_frontswap_wait lock 
+*/
+int judge_whether_sleep(void)
+{
+	unsigned long time ;
+	int num , num_new ;
+	// no need to get time
+	if( get_uksm_wait_num() > 0 )
+		goto sleep_no_clear ;
+//	return 1 ;
+
+	time = jiffies ;
+	num = atomic_read( &uksm_vma_num ) ;
+	num_new = atomic_read( &uksm_vma_num_new ) ;
+	printk(" num : %d    num_new : %d\n", num , num_new ) ;
+	if( !time_after( time , uksm_runtime_backup.uksm_sleep_real ) )
+	{
+		//  num_new  >  xxxx , goto sleep
+		return 0 ;
+	}
+	if( num_new * 100 / num > 20 && num_new > 1000 )
+		goto sleep ;
+	if( num_new > 5000 ) 
+		goto sleep ;
+	return 0 ;
+
+sleep:
+	atomic_set( &uksm_vma_num_new , 0 ) ;
+sleep_no_clear:
+	return 1 ;
+}
+
+/* I think this function can be realized by a assemble code
+*/
+int whether_wake_up(void)
+{
+	if( uksm_runtime_backup.uksm_eval_round == uksm_eval_round )
+		return 0 ;
+	uksm_runtime_backup.uksm_eval_round = uksm_eval_round ;
+//	uksm_runtime_backup.uksm_sleep_real = get_jiffies_64() + uksm_sleep_real * 10 ;
+	uksm_runtime_backup.uksm_sleep_real = jiffies + uksm_sleep_real * 30 ;
+
+	return 1 ;
+}
+
+
+#else
+
+
+void restore_uksm_runtime_data(void)
+{
+	;
+}
+int test_uksm_backup(void)
+{
+	return 0 ;
+}
+void save_uksm_runtime_data(void)
+{
+	;
+}
+void save_sleep_time(void)
+{
+	;
+}
+void clear_sleep_time(void)
+{
+	;
+}
+
+int judge_whether_sleep(void)
+{	
+	return 0 ;
+}
+
+/* default should wake up process in case sleep forever
+*/
+int whether_wake_up(void)
+{
+	return 1 ;
+}
+
+#endif
 

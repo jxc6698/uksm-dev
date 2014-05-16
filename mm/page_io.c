@@ -250,7 +250,7 @@ int swap_writepage(struct page *page, struct writeback_control *wbc)
 		prepare_to_wait( &uksm_frontswap_wait , &wait , TASK_INTERRUPTIBLE) ;
 		raw_spin_lock_irqsave( &uksm_run_data_lock , flags ) ;
 
-		add_uksm_wait() ;
+
 		if( get_uksm_wait_num() > 0 || test_uksm_in() )
 		{
 			;
@@ -259,28 +259,21 @@ int swap_writepage(struct page *page, struct writeback_control *wbc)
 			wake_up_process( uksm_task ) ;
 		}
 
-		raw_spin_unlock_irqrestore( &uksm_run_data_lock , flags ) ;
 
-		schedule() ;
-		finish_wait( &uksm_frontswap_wait , &wait ) ;
-	}
-
-/*	
-	if( PageKsm( page ) )
-	{
-		if( temp_res )
+		if( judge_whether_sleep() )
 		{
-			printk("\n\n\n both uksm page \n\n\n" );
+			
+			add_uksm_wait() ; // do it earlier
+			raw_spin_unlock_irqrestore( &uksm_run_data_lock , flags ) ;
+			schedule() ;
 		}
 		else
 		{
-			printk( " \n\n\n uksm handle it \n\n\n") ;
+			raw_spin_unlock_irqrestore( &uksm_run_data_lock , flags ) ;
 		}
-	}else if( temp_res )
-	{
-		printk("\n\n\n origin is ksm \n\n\n") ;
+		finish_wait( &uksm_frontswap_wait , &wait ) ;
 	}
-*/
+
 
 	if (frontswap_store(page) == 0) {
 		set_page_writeback(page);

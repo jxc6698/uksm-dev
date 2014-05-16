@@ -27,6 +27,9 @@ extern struct mutex uksm_frontswap_wait_mutex ;
 extern struct raw_spinlock uksm_run_data_lock ;
 extern long uksm_run_data_lock_flag ;
 
+#define UKSM_ZSWAP
+
+#ifdef UKSM_ZSWAP
 
 #define UKSM_IN  (0x00000001 << 16)
 
@@ -60,6 +63,34 @@ static int set_uksm_out(void)
 	return uksm_run_data_lock_flag ;
 }
 
+#else
+
+
+static int test_uksm_in(void)
+{
+	return 0 ;
+}
+static long get_uksm_wait_num(void)
+{
+	return 0 ;
+}
+
+static int add_uksm_wait(void)
+{
+	return 0 ;
+}
+
+static int set_uksm_in(void)
+{
+	return 1 ;
+}
+static int set_uksm_out(void)
+{
+	return 0 ;
+}
+#endif
+
+
 #define SCAN_LADDER_SIZE 4
 
 
@@ -73,6 +104,9 @@ struct uksm_real_runtime_flags{
 	unsigned int cover_msecs[ SCAN_LADDER_SIZE ] ;
 	unsigned int max_cpu ;
 	unsigned int uksm_cpu_governor ;
+
+	unsigned long long uksm_eval_round ;
+	unsigned long uksm_sleep_real ;
 };
 
 #undef SCAN_LADDER_SIZE
@@ -81,8 +115,10 @@ extern struct uksm_real_runtime_flags uksm_runtime_backup ;
 extern void save_uksm_runtime_data(void) ;
 extern void restore_uksm_runtime_data(void) ;
 extern int test_uksm_backup(void) ;
-
-
+extern void save_sleep_time(void) ;
+extern void clear_sleep_time(void) ;
+extern int judge_whether_sleep(void) ;
+extern int whether_wake_up(void) ;
 
 
 
